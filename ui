@@ -1,0 +1,245 @@
+Step-by-Step Solution to Manually Create the Cypress Project and ZIP It
+Since I can’t directly send a ZIP file, I’ll give you a complete, step-by-step guide to manually create the entire “your-demo-project” folder on your computer. You’ll copy the file contents I provide below into text files (using a text editor like Notepad, VS Code, or TextEdit). Then, zip the folder yourself. This is beginner-friendly and ensures no Base64 issues.
+Step 1: Create the Project Folder Structure
+	1	On your computer, create a new folder named your-demo-project.
+	2	Inside your-demo-project, create these subfolders:
+	◦	cypress
+	▪	Inside cypress, create e2e
+	▪	Inside e2e, create orders
+	▪	Inside cypress, create support
+	◦	testData
+Your structure should look like this:
+your-demo-project/
+├── cypress/
+│   ├── e2e/
+│   │   └── orders/
+│   └── support/
+├── testData/
+Step 2: Create and Copy File Contents
+Use a text editor to create each file in the correct location. Copy the content exactly as shown (including indentation for JS files). Save with the exact file name and extension.
+	1	cypress.config.js (in root your-demo-project folder) const { defineConfig } = require('cypress');
+	2	
+	3	module.exports = defineConfig({
+	4	  e2e: {
+	5	    testIsolation: true,
+	6	    setupNodeEvents(on, config) {},
+	7	  },
+	8	});
+	9	
+	10	package.json (in root your-demo-project folder) {
+	11	  "name": "your-demo-project",
+	12	  "version": "1.0.0",
+	13	  "devDependencies": {
+	14	    "cypress": "^13.0.0",
+	15	    "xlsx": "^0.18.5"
+	16	  },
+	17	  "scripts": {
+	18	    "cypress:open": "cypress open",
+	19	    "cypress:run": "cypress run"
+	20	  }
+	21	}
+	22	
+	23	README.md (in root your-demo-project folder) # Cypress Demo with Consolidated Data
+	24	
+	25	## Run
+	26	npx cypress open --env MODULE=orders,COUNTRY=USA,ENV=dev,ROLE=Admin
+	27	
+	28	## Features
+	29	- Consolidated Excel: One per module with CRUD sheets.
+	30	- Scales to 15-16 modules / 3500 tests.
+	31	
+	32	cypress/support/e2e.js before(() => {
+	33	  cy.log('Global setup for all scripts');
+	34	});
+	35	
+	36	after(() => {
+	37	  cy.log('Global teardown for all scripts');
+	38	});
+	39	
+	40	cypress/support/dataHelper.js import XLSX from 'xlsx';
+	41	
+	42	export function readExcel(filePath) {
+	43	  const workbook = XLSX.readFile(filePath);
+	44	  const sheetName = workbook.SheetNames[0];
+	45	  return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+	46	}
+	47	
+	48	cypress/support/credentialsResolver.js import { readExcel } from './dataHelper';
+	49	
+	50	const creds = readExcel('credentials.xlsx');
+	51	
+	52	export function resolveCredentials({ country, env, role }) {
+	53	  const cred = creds.find(r =>
+	54	    r.Country === country &&
+	55	    r.Env === env &&
+	56	    r.Role === role
+	57	  );
+	58	  if (!cred) throw new Error(`No creds for ${country}, ${env}, ${role}`);
+	59	  return cred;
+	60	}
+	61	
+	62	cypress/support/testDataResolver.js import XLSX from 'xlsx';
+	63	
+	64	const testDataCache = {};
+	65	
+	66	export function loadTestData(module, operation) {
+	67	  const cacheKey = `${module}_${operation}`;
+	68	  if (!testDataCache[cacheKey]) {
+	69	    const filePath = `testData/${module}.xlsx`;
+	70	    const workbook = XLSX.readFile(filePath);
+	71	    const sheetName = operation.charAt(0).toUpperCase() + operation.slice(1);
+	72	    if (!workbook.Sheets[sheetName]) throw new Error(`No sheet ${sheetName} in ${filePath}`);
+	73	    testDataCache[cacheKey] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+	74	  }
+	75	  return testDataCache[cacheKey];
+	76	}
+	77	
+	78	function matchValue(cell, key) {
+	79	  if (!cell || cell === 'ALL') return true;
+	80	  return cell.split(',').map(v => v.trim()).includes(key);
+	81	}
+	82	
+	83	export function filterRunnableCases(module, operation, country, env, role) {
+	84	  const rows = loadTestData(module, operation)
+	85	    .filter(r => r.Run && r.Run.toUpperCase() === 'Y')
+	86	    .filter(r =>
+	87	      matchValue(r.Country, country) &&
+	88	      matchValue(r.Env, env) &&
+	89	      matchValue(r.Role, role)
+	90	    );
+	91	  return rows;
+	92	}
+	93	
+	94	cypress/support/commands.js Cypress.Commands.add('loginAs', (baseUrl, username, password) => {
+	95	  cy.session([baseUrl, username, password], () => {
+	96	    cy.visit(baseUrl + '/login');
+	97	    cy.get('#username').type(username);
+	98	    cy.get('#password').type(password);
+	99	    cy.get('button[type="submit"]').click();
+	100	    cy.url().should('not.include', '/login');
+	101	    cy.log('Login executed');
+	102	  }, {
+	103	    validate: () => {
+	104	      cy.request(baseUrl).its('status').should('eq', 200);
+	105	    }
+	106	  });
+	107	});
+	108	
+	109	cypress/support/testActions.js (new for avoiding duplication) export function performCreate(tc, creds) {
+	110	  cy.visit(creds.BaseUrl + '/orders/new');
+	111	  cy.get('#product').type(tc.ProductName);
+	112	  cy.get('#amount').type(tc.Amount.toString());
+	113	  cy.get('button[type="submit"]').click();
+	114	  cy.contains('Order created').should('be.visible');
+	115	}
+	116	
+	117	export function performUpdate(tc, creds) {
+	118	  cy.visit(creds.BaseUrl + '/orders/edit/' + tc.OrderID);
+	119	  cy.get('#product').type(tc.NewProductName);
+	120	  cy.get('#amount').type(tc.NewAmount.toString());
+	121	  cy.get('button[type="submit"]').click();
+	122	  cy.contains('Order updated').should('be.visible');
+	123	}
+	124	
+	125	export function performDelete(tc, creds) {
+	126	  cy.visit(creds.BaseUrl + '/orders/' + tc.OrderID);
+	127	  cy.get('[data-cy=delete]').click();
+	128	  cy.contains('Order deleted').should('be.visible');
+	129	}
+	130	
+	131	export function performView(tc, creds) {
+	132	  cy.visit(creds.BaseUrl + '/orders/' + tc.OrderID);
+	133	  cy.contains(tc.ProductName).should('be.visible');
+	134	}
+	135	
+	136	export function performSearch(tc, creds) {
+	137	  cy.visit(creds.BaseUrl + '/orders/search');
+	138	  cy.get('#search').type(tc.SearchTerm);
+	139	  cy.get('button[type="submit"]').click();
+	140	  cy.get('.results').should('have.length', tc.ExpectedResults);
+	141	}
+	142	
+	143	export function performCancel(tc, creds) {
+	144	  cy.visit(creds.BaseUrl + '/orders/' + tc.OrderID + '/cancel');
+	145	  cy.get('[data-cy=cancel]').click();
+	146	  cy.contains('Order canceled').should('be.visible');
+	147	}
+	148	
+	149	cypress/e2e/orders/create.spec.js import { filterRunnableCases } from '../../support/testDataResolver';
+	150	import { resolveCredentials } from '../../support/credentialsResolver';
+	151	import { performCreate } from '../../support/testActions';
+	152	
+	153	const module = Cypress.env('MODULE') || 'orders';
+	154	const country = Cypress.env('COUNTRY');
+	155	const env = Cypress.env('ENV');
+	156	const role = Cypress.env('ROLE');
+	157	const operation = 'create';
+	158	
+	159	const runnableCases = filterRunnableCases(module, operation, country, env, role);
+	160	
+	161	describe(`Create Order Tests - ${country} - ${env} - ${role}`, () => {
+	162	  let creds;
+	163	  before(() => {
+	164	    creds = resolveCredentials({ country, env, role });
+	165	    cy.visit(creds.BaseUrl);
+	166	    cy.url().then((url) => {
+	167	      if (url.includes('/login')) {
+	168	        cy.loginAs(creds.BaseUrl, creds.Username, creds.Password);
+	169	      } else {
+	170	        cy.log('Session restored; no login needed');
+	171	      }
+	172	    });
+	173	  });
+	174	
+	175	  runnableCases.forEach(tc => {
+	176	    it(`Test ${tc.TestCaseID}: Create order with variables ${Object.keys(tc).join(', ')}`, () => {
+	177	      performCreate(tc, creds);
+	178	    });
+	179	  });
+	180	});
+	181	
+	182	cypress/e2e/orders/update.spec.js import { filterRunnableCases } from '../../support/testDataResolver';
+	183	import { resolveCredentials } from '../../support/credentialsResolver';
+	184	import { performUpdate } from '../../support/testActions';
+	185	
+	186	const module = Cypress.env('MODULE') || 'orders';
+	187	const country = Cypress.env('COUNTRY');
+	188	const env = Cypress.env('ENV');
+	189	const role = Cypress.env('ROLE');
+	190	const operation = 'update';
+	191	
+	192	const runnableCases = filterRunnableCases(module, operation, country, env, role);
+	193	
+	194	describe(`Update Order Tests - ${country} - ${env} - ${role}`, () => {
+	195	  let creds;
+	196	  before(() => {
+	197	    creds = resolveCredentials({ country, env, role });
+	198	    cy.visit(creds.BaseUrl);
+	199	    cy.url().then((url) => {
+	200	      if (url.includes('/login')) {
+	201	        cy.loginAs(creds.BaseUrl, creds.Username, creds.Password);
+	202	      } else {
+	203	        cy.log('Session restored; no login needed');
+	204	      }
+	205	    });
+	206	  });
+	207	
+	208	  runnableCases.forEach(tc => {
+	209	    it(`Test ${tc.TestCaseID}: Update order with variables ${Object.keys(tc).join(', ')}`, () => {
+	210	      performUpdate(tc, creds);
+	211	    });
+	212	  });
+	213	});
+	214	
+	215	cypress/e2e/orders/delete.spec.js (follow the pattern for view, search, cancel – replace operation and perform function accordingly) (To save space, use the pattern from create.spec.js, changing operation = 'delete'; and performDelete(tc, creds);. Do the same for view, search, cancel.)
+	216	credentials.xlsx (in root folder) – Create in Excel, add sample rows as per previous messages.
+	217	testData/orders.xlsx – Create in Excel, add sheets (Create, Update, etc.) with sample rows as per previous messages.
+Step 3: Install Dependencies and Test
+	1	Open terminal/cmd in your-demo-project.
+	2	Run npm install.
+	3	Run npx cypress open --env MODULE=orders,COUNTRY=USA,ENV=dev,ROLE=Admin to test.
+Step 4: Create the ZIP
+	1	Right-click your-demo-project folder.
+	2	Select “Compress” or “Send to > Compressed (zipped) folder” (Windows) or “Compress” (Mac).
+	3	Name it demo-solution.zip.
+This is the complete manual solution – copy and create files as above. If you need content for a specific file I abbreviated, let me know!
